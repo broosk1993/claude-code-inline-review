@@ -13,7 +13,7 @@ const crypto = require('crypto');
  * @typedef {{
  *   path: string, existed: boolean, content: string, createdAt: number,
  *   version?: number, tool?: string, sessionId?: string,
- *   jsonPath: string, key: string
+ *   jsonPath: string, key: string, landedAt?: number
  * }} Entry
  */
 
@@ -91,6 +91,7 @@ function loadEntries(dir = baselineDir()) {
       content: raw.content.replace(/^\uFEFF/, ''),
       jsonPath,
       key: keyOf(raw.path),
+      landedAt: landedAt(jsonPath),
     };
     const prev = out.get(entry.key);
     if (!prev || entry.createdAt < prev.createdAt) out.set(entry.key, entry);
@@ -98,9 +99,18 @@ function loadEntries(dir = baselineDir()) {
   return out;
 }
 
+/** When the hook last saw Claude's write to this file land (0 if it has not). */
+function landedAt(jsonPath) {
+  try {
+    return fs.statSync(jsonPath.replace(/\.json$/, '.landed')).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 /** The persisted fields of an entry. */
 function serialize(entry) {
-  const { jsonPath, key, ...rest } = entry;
+  const { jsonPath, key, landedAt: _landed, ...rest } = entry;
   return rest;
 }
 
@@ -113,10 +123,12 @@ function writeEntry(entry) {
 }
 
 function removeEntry(entry) {
-  try {
-    fs.unlinkSync(entry.jsonPath);
-  } catch {
-    /* already gone */
+  for (const p of [entry.jsonPath, entry.jsonPath.replace(/\.json$/, '.landed')]) {
+    try {
+      fs.unlinkSync(p);
+    } catch {
+      /* already gone */
+    }
   }
 }
 
@@ -136,4 +148,5 @@ module.exports = {
   removeEntry,
   snapshot,
   serialize,
+  landedAt,
 };

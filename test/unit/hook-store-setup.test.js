@@ -152,6 +152,7 @@ test('setup: install merges into settings, is idempotent, and only sets acceptEd
   assert.equal(s.hooks.PreToolUse.length, 2);
   assert.equal(s.permissions.defaultMode, undefined);
   assert.equal(s.hooks.PreToolUse[1].matcher, 'Edit|MultiEdit|Write');
+  assert.equal(s.hooks.PostToolUse.length, 1, 'PostToolUse reports landed writes');
   assert.ok(fs.existsSync(path.join(dir, 'hooks', 'review-snapshot.js')));
   assert.ok(fs.readdirSync(dir).some((f) => f.startsWith('settings.json.backup-')));
 
@@ -164,7 +165,9 @@ test('setup: install merges into settings, is idempotent, and only sets acceptEd
 
   const st = setup.status(HOOK, dir);
   assert.equal(st.configured, true);
+  assert.equal(st.complete, true);
   assert.equal(st.upToDate, true);
+  assert.equal(st.outdated, false);
 });
 
 test('setup: repairs an old matcher, refuses invalid JSON, uninstalls cleanly', () => {
@@ -191,4 +194,49 @@ test('setup: recognises the v0.2 hook as ours and out of date', () => {
   assert.equal(setup.hookVersion(legacy), 'legacy');
   assert.equal(setup.hookVersion(fs.readFileSync(HOOK, 'utf8')), require('../../package.json').version);
   assert.equal(setup.hookVersion('console.log(1)'), null);
+});
+
+test('hook PostToolUse marks a pending baseline as landed, and nothing else', () => {
+  const root = tmpdir();
+  const dir = path.join(root, 'b');
+  const file = path.join(root, 'f.txt');
+  fs.writeFileSync(file, 'x\n');
+  runHook({ hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: file }, cwd: root }, { CLAUDE_REVIEW_DIR: dir });
+  assert.ok(!fs.existsSync(dir), 'no baseline, so no marker');
+  runHook({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: file }, cwd: root }, { CLAUDE_REVIEW_DIR: dir });
+  let [entry] = store.loadEntries(dir).values();
+  assert.equal(entry.landedAt, 0);
+  runHook({ hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: file }, cwd: root }, { CLAUDE_REVIEW_DIR: dir });
+  [entry] = store.loadEntries(dir).values();
+  assert.ok(entry.landedAt > 0);
+  store.writeEntry(entry);
+  assert.equal(JSON.parse(fs.readFileSync(entry.jsonPath, 'utf8')).landedAt, undefined, 'not persisted into the baseline');
+  store.removeEntry(entry);
+  assert.deepEqual(fs.readdirSync(dir), [], 'removing a review removes its marker');
+});
+
+test('setup writes through a symlinked settings.json and keeps its permissions', () => {
+  const dir = tmpdir();
+  const dotfiles = tmpdir();
+  const real = path.join(dotfiles, 'claude-settings.json');
+  fs.writeFileSync(real, JSON.stringify({ env: { SECRET: 'x' } }));
+  fs.chmodSync(real, 0o600);
+  fs.symlinkSync(real, path.join(dir, 'settings.json'));
+  setup.install({ bundledHook: HOOK, dir });
+  assert.ok(fs.lstatSync(path.join(dir, 'settings.json')).isSymbolicLink(), 'still a symlink');
+  assert.equal(fs.statSync(real).mode & 0o777, 0o600);
+  assert.ok(JSON.parse(fs.readFileSync(real, 'utf8')).hooks.PreToolUse);
+  const backup = fs.readdirSync(dir).find((f) => f.startsWith('settings.json.backup-'));
+  assert.equal(fs.statSync(path.join(dir, backup)).mode & 0o777, 0o600);
+});
+
+test('setup only ever upgrades the hook', () => {
+  assert.equal(setup.compareVersions('legacy', '0.3.0'), -1);
+  assert.equal(setup.compareVersions('0.3.0', '0.3.0'), 0);
+  assert.equal(setup.compareVersions('0.10.0', '0.9.1'), 1);
+  const dir = tmpdir();
+  fs.mkdirSync(path.join(dir, 'hooks'));
+  fs.writeFileSync(path.join(dir, 'hooks', 'review-snapshot.js'), '// claude-inline-review hook v9.0.0\n');
+  const st = setup.status(HOOK, dir);
+  assert.equal(st.outdated, false, 'a newer hook from another editor is left alone');
 });

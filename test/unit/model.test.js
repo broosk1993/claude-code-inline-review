@@ -141,3 +141,39 @@ test('hunkStat and totals', () => {
   assert.equal(model.plural(1, 'change'), '1 change');
   assert.equal(model.plural(2, 'change'), '2 changes');
 });
+
+test('replaceLines matches split/splice/join on uniform line endings', () => {
+  let seed = 3;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
+  for (let round = 0; round < 3000; round++) {
+    const eol = rand() < 0.5 ? '\n' : '\r\n';
+    const lines = Array.from({ length: Math.floor(rand() * 6) + 1 }, () => (rand() < 0.3 ? '' : 'l' + Math.floor(rand() * 9)));
+    const text = lines.join(eol);
+    const start = Math.floor(rand() * (lines.length + 1));
+    const count = Math.floor(rand() * (lines.length - Math.min(start, lines.length) + 1));
+    const repl = Array.from({ length: Math.floor(rand() * 3) }, (_, i) => 'n' + i);
+    if (start === lines.length && count === 0 && repl.length === 0) continue;
+    const expected = [...lines];
+    expected.splice(start, count, ...repl);
+    assert.equal(model.replaceLines(text, start, count, repl, eol), expected.join(eol), JSON.stringify({ text, start, count, repl }));
+  }
+});
+
+test('reject in a mixed-ending file leaves the other line endings alone', () => {
+  const base = 'a\nb\nc\nd\r\n';
+  const now = 'a\nB\nc\nd\r\n';
+  const [h] = hunksOf(base, now);
+  assert.equal(model.rejectHunkInText(now, h, '\n'), base);
+  assert.equal(model.acceptHunkInBaseline(base, h, '\n'), now);
+});
+
+test('accepting or rejecting at the end of a file without a final newline', () => {
+  const base = 'x';
+  const now = 'x\ny';
+  const [h] = hunksOf(base, now);
+  assert.equal(model.rejectHunkInText(now, h, '\n'), 'x');
+  assert.equal(model.acceptHunkInBaseline(base, h, '\n'), 'x\ny');
+  const [d] = hunksOf('x\r\ny', 'x');
+  assert.equal(model.rejectHunkInText('x', d, '\r\n'), 'x\r\ny');
+  assert.equal(model.acceptHunkInBaseline('x\r\ny', d, '\r\n'), 'x');
+});

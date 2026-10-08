@@ -36,7 +36,12 @@ fs.writeFileSync(
   JSON.stringify(
     {
       permissions: { defaultMode: 'acceptEdits' },
-      hooks: { PreToolUse: [{ matcher: 'Edit|MultiEdit|Write', hooks: [{ type: 'command', command: 'node "$HOME/.claude/hooks/review-snapshot.js"' }] }] },
+      hooks: Object.fromEntries(
+        ['PreToolUse', 'PostToolUse'].map((event) => [
+          event,
+          [{ matcher: 'Edit|MultiEdit|Write', hooks: [{ type: 'command', command: 'node "$HOME/.claude/hooks/review-snapshot.js"' }] }],
+        ])
+      ),
     },
     null,
     2

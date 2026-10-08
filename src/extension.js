@@ -21,6 +21,9 @@ const BASE_SCHEME = 'claude-review-base';
 // no difference is normal for a moment, and for as long as a permission
 // prompt waits. Only after this long is it treated as abandoned.
 const STALE_MS = 10 * 60_000;
+const WAITING_MS = 24 * 60 * 60_000;
+// Rejecting a review this old restores a file to how it was back then; warn first.
+const OLD_REVIEW_MS = 24 * 60 * 60_000;
 const HISTORY_LIMIT = 50;
 const IS_MAC = process.platform === 'darwin';
 const { plural } = model;
@@ -42,7 +45,11 @@ const announced = new Set();
 const history = [];
 /** @type {{ key: string, file: FileUndo, item: HistoryItem, entryAfter: Entry | null } | null} */
 let redoCandidate = null;
-let ownEdit = 0;
+/** Edits the extension itself is applying, per document key. */
+const ownEdits = new Map();
+const isOwn = (key) => (ownEdits.get(key) || 0) > 0;
+/** Whether the installed hook reports landed writes (PostToolUse); decides how long an empty review waits. */
+let hookReportsLanding = false;
 let initialized = false;
 /** @type {string[]} */
 let workspaceRoots = [];
@@ -241,14 +248,22 @@ function settleUnsure(key, doc, dirty) {
   unsure.delete(key);
   clearTimeout(q.timer);
   const entry = entries.get(key);
-  if (dirty && entry && q.baseVersion === q.firstVersion - 1) {
-    // A change whose result is exactly the file on disk is the reload, even
-    // when your typing right after it made the document dirty.
+  if (entry && q.baseVersion === q.firstVersion - 1) {
     const disk = readDisk(key, doc.uri.fsPath);
     let text = q.baseText;
-    for (const ev of q.events) {
-      text = applyChanges(text, ev.changes);
-      ev.user = !ev.own && text !== disk;
+    if (dirty) {
+      // A change whose result is exactly the file on disk is the reload, even
+      // when your typing right after it made the document dirty.
+      for (const ev of q.events) {
+        text = applyChanges(text, ev.changes);
+        ev.user = !ev.own && text !== disk;
+      }
+    } else {
+      // Still clean: a reload, but only if it really produced the disk
+      // content. If the extension host stalled past the timer, a keystroke can
+      // get here before its dirty flag does.
+      for (const ev of q.events) text = applyChanges(text, ev.changes);
+      for (const ev of q.events) ev.user = !ev.own && text !== disk;
     }
     absorbEvents(entry, q.baseText, q.events, eolOfDoc(doc));
   }
@@ -273,19 +288,20 @@ function onDocChange(e) {
 
   const q = unsure.get(key);
   if (q) {
-    q.events.push({ changes: e.contentChanges, own: ownEdit > 0, user: false });
-    if (doc.isDirty && !ownEdit) settleUnsure(key, doc, true);
+    q.events.push({ changes: e.contentChanges, own: isOwn(key), user: false });
+    if (doc.isDirty && !isOwn(key)) settleUnsure(key, doc, true);
     return;
   }
 
-  if (!ownEdit && e.reason === vscode.TextDocumentChangeReason.Undo && undoneInEditor(key, doc)) return afterDocChange(doc);
-  if (!ownEdit && e.reason === vscode.TextDocumentChangeReason.Redo && redoneInEditor(key, doc)) return afterDocChange(doc);
+  const own = isOwn(key);
+  if (!own && e.reason === vscode.TextDocumentChangeReason.Undo && undoneInEditor(key, doc)) return afterDocChange(doc);
+  if (!own && e.reason === vscode.TextDocumentChangeReason.Redo && redoneInEditor(key, doc)) return afterDocChange(doc);
 
   const entry = entries.get(key);
   if (!entry) return;
   const prev = docState.get(key);
-  log.trace(`change in ${path.basename(doc.uri.fsPath)}: reason=${e.reason} dirty=${doc.isDirty} own=${ownEdit} v${doc.version} (settled v${prev && prev.version})`);
-  if (ownEdit || !prev || prev.version !== doc.version - 1) return afterDocChange(doc);
+  log.trace(`change in ${path.basename(doc.uri.fsPath)}: reason=${e.reason} dirty=${doc.isDirty} own=${own} v${doc.version} (settled v${prev && prev.version})`);
+  if (own || !prev || prev.version !== doc.version - 1) return afterDocChange(doc);
 
   if (e.reason !== undefined || doc.isDirty) {
     absorbEvents(entry, prev.text, [{ changes: e.contentChanges, user: true }], eolOfDoc(doc));
@@ -361,7 +377,10 @@ function refreshNow() {
     if (!inScope(key)) continue;
     const hunks = hunksOf(entry);
     if (hunks.length === 0) {
-      if (now - entry.createdAt > STALE_MS) dropEntry(entry);
+      // Before Claude's write lands (a permission prompt can take a while)
+      // an empty review is normal; only the hook's landed marker says it is done.
+      const limit = entry.landedAt || !hookReportsLanding ? STALE_MS : WAITING_MS;
+      if (now - Math.max(entry.createdAt, entry.landedAt || 0) > limit && fullyResolved(entry)) dropEntry(entry);
       continue;
     }
     next.set(key, { entry, hunks });
@@ -667,7 +686,7 @@ const tree = {
       const t = model.totals(hunks);
       const dir = vscode.workspace.asRelativePath(path.dirname(entry.path), false);
       item.description = `${dir && dir !== path.dirname(entry.path) ? dir + '  ' : ''}−${t.removed} +${t.added}`;
-      item.tooltip = `${entry.path}\n${plural(hunks.length, 'change')}${entry.existed ? '' : ' · new file'}`;
+      item.tooltip = `${entry.path}\n${plural(hunks.length, 'change')}${entry.existed ? '' : ' · new file'} · review started ${age(Date.now() - entry.createdAt)} ago`;
       item.contextValue = entry.existed ? 'claudeReview.file' : 'claudeReview.newFile';
       item.command = { command: 'claudeReview.openFile', title: 'Open', arguments: [node.key] };
       return item;
@@ -762,16 +781,23 @@ async function writeFileText(fsPath, text) {
   const doc = fs.existsSync(fsPath) ? openDoc(key) : undefined;
   if (doc) {
     const edit = model.minimalEdit(doc.getText(), text);
-    ownEdit++;
-    try {
-      if (edit) {
-        const we = new vscode.WorkspaceEdit();
-        we.replace(doc.uri, new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)), edit.text);
-        if (!(await vscode.workspace.applyEdit(we))) throw new Error(`The editor refused the edit to ${path.basename(fsPath)}`);
+    if (edit) {
+      const we = new vscode.WorkspaceEdit();
+      we.replace(doc.uri, new vscode.Range(doc.positionAt(edit.start), doc.positionAt(edit.end)), edit.text);
+      // Only this edit is ours. Edits made while saving (format on save,
+      // fix-all) are treated like yours: absorbed when outside Claude's changes.
+      ownEdits.set(key, (ownEdits.get(key) || 0) + 1);
+      let applied;
+      try {
+        applied = await vscode.workspace.applyEdit(we);
+      } finally {
+        ownEdits.set(key, ownEdits.get(key) - 1);
+        if (!ownEdits.get(key)) ownEdits.delete(key);
       }
-      if (cfg('saveAfterReject', true) && doc.isDirty) await doc.save();
-    } finally {
-      ownEdit--;
+      if (!applied) throw new Error(`The editor refused the edit to ${path.basename(fsPath)}.`);
+    }
+    if (cfg('saveAfterReject', true) && doc.isDirty && !(await doc.save())) {
+      throw new Error(`Could not save ${path.basename(fsPath)}; the review stays open until it is saved.`);
     }
   } else {
     let bom = false;
@@ -794,17 +820,64 @@ function fileUndo(entry, textBefore = null) {
   return { key: entry.key, path: entry.path, entry: store.snapshot(entry), text: textBefore, textAfter: undefined };
 }
 
+/** @returns {HistoryItem | null} */
 function record(label, files) {
-  if (!files.length) return;
-  history.push({ label, files });
+  if (!files.length) return null;
+  const item = { label, files };
+  history.push(item);
   while (history.length > HISTORY_LIMIT) history.shift();
   redoCandidate = null;
+  return item;
+}
+
+function forget(item) {
+  const i = history.indexOf(item);
+  if (i >= 0) history.splice(i, 1);
+}
+
+/**
+ * Nothing left to review, in the editor *and* on disk. An unsaved document can
+ * show a review as done while the disk still has Claude's text (the save
+ * failed, or saving after reject is off); keep the review until the disk agrees.
+ */
+function fullyResolved(entry) {
+  if (hunksOf(entry).length) return false;
+  const doc = openDoc(entry.key);
+  if (!doc || !doc.isDirty) return true;
+  const disk = readDisk(entry.key, entry.path);
+  return disk === null ? !entry.existed : diffLines(splitLines(entry.content), splitLines(disk)).length === 0;
 }
 
 /** Drops a file's review once nothing is left in it. */
 function settle(key) {
   const entry = entries.get(key);
-  if (entry && hunksOf(entry).length === 0) dropEntry(entry);
+  if (entry && fullyResolved(entry)) dropEntry(entry);
+}
+
+function age(ms) {
+  const h = Math.round(ms / 3_600_000);
+  if (h < 1) return `${Math.max(1, Math.round(ms / 60_000))} min`;
+  if (h < 48) return `${h} h`;
+  return `${Math.round(h / 24)} days`;
+}
+
+/** Asks before rejecting reviews old enough that the file may have changed for other reasons since. */
+async function confirmOld(targets) {
+  const old = targets.filter((e) => e.existed && Date.now() - e.createdAt > OLD_REVIEW_MS);
+  if (!old.length) return true;
+  const oldest = Math.max(...old.map((e) => Date.now() - e.createdAt));
+  const ok = await vscode.window.showWarningMessage(
+    old.length === 1
+      ? `The review of ${path.basename(old[0].path)} started ${age(oldest)} ago.`
+      : `${plural(old.length, 'review')} started up to ${age(oldest)} ago.`,
+    {
+      modal: true,
+      detail:
+        'Rejecting restores the file to how it was before Claude\'s first edit back then. Changes made since by other tools (git, formatters, another editor) would be undone too.',
+    },
+    'Reject anyway'
+  );
+  return ok === 'Reject anyway';
 }
 
 // ---------- actions ----------
@@ -827,11 +900,13 @@ async function rejectHunk(arg, bStart) {
   const after = model.rejectHunkInText(before, t.hunk, eolFor(t.entry));
   const undo = fileUndo(t.entry, before);
   undo.textAfter = after;
-  record('Reject change', [undo]);
+  const item = record('Reject change', [undo]);
   try {
     await writeFileText(t.entry.path, after);
   } catch (e) {
-    history.pop();
+    // Keep the undo record if the edit itself went in (only the save failed).
+    if (liveText(t.key, t.entry.path) === before) forget(item);
+    refreshNow();
     return vscode.window.showErrorMessage(String(e.message || e));
   }
   settle(t.key);
@@ -878,19 +953,13 @@ async function rejectEntry(entry, confirmDelete) {
     }
     const uri = fileUri(entry);
     const doc = openDoc(entry.key);
-    if (doc && doc.isDirty) {
-      ownEdit++;
-      try {
-        await doc.save();
-      } finally {
-        ownEdit--;
-      }
-    }
+    if (doc && doc.isDirty) await doc.save();
     try {
       await vscode.workspace.fs.delete(uri, { useTrash: true });
     } catch {
       await vscode.workspace.fs.delete(uri, { useTrash: false }).then(undefined, () => {});
     }
+    if (fs.existsSync(entry.path)) throw new Error(`Could not delete ${path.basename(entry.path)}.`);
     // Like Cursor: a rejected new file goes away, tab included.
     const tabs = vscode.window.tabGroups.all
       .flatMap((g) => g.tabs)
@@ -898,11 +967,12 @@ async function rejectEntry(entry, confirmDelete) {
     if (tabs.length) await vscode.window.tabGroups.close(tabs, true).then(undefined, () => {});
     diskCache.delete(entry.key);
     undo.textAfter = null;
+    dropEntry(entry);
   } else {
     await writeFileText(entry.path, entry.content);
     undo.textAfter = entry.content;
+    settle(entry.key);
   }
-  dropEntry(entry);
   return undo;
 }
 
@@ -910,6 +980,7 @@ async function rejectFile(arg) {
   const key = fileKeyFrom(arg);
   const entry = key && entries.get(key);
   if (!entry) return note('No Claude changes in this file.');
+  if (!(await confirmOld([entry]))) return;
   try {
     const undo = await rejectEntry(entry, true);
     if (undo) record('Reject file', [undo]);
@@ -934,8 +1005,11 @@ async function rejectAll() {
   const keys = sortedPendingKeys();
   if (!keys.length) return note('No Claude changes to reject.');
   const total = keys.reduce((s, k) => s + pending.get(k).hunks.length, 0);
+  // The map can change while a dialog is open (Claude edits, another window
+  // accepts); hold on to what was asked about.
+  const targets = keys.map((k) => pending.get(k).entry);
   if (cfg('confirmRejectAll', true)) {
-    const created = keys.filter((k) => !pending.get(k).entry.existed).length;
+    const created = targets.filter((e) => !e.existed).length;
     const ok = await vscode.window.showWarningMessage(
       `Undo ${plural(total, 'Claude change')} in ${plural(keys.length, 'file')}?` +
         (created ? ` ${plural(created, 'file')} Claude created will be deleted.` : ''),
@@ -944,18 +1018,24 @@ async function rejectAll() {
     );
     if (ok !== 'Reject all') return;
   }
+  if (!(await confirmOld(targets))) return;
   const undo = [];
   const failed = [];
-  for (const k of keys) {
-    try {
-      const u = await rejectEntry(pending.get(k).entry, false);
-      if (u) undo.push(u);
-    } catch (e) {
-      failed.push(`${path.basename(pending.get(k).entry.path)}: ${e.message || e}`);
+  try {
+    for (const target of targets) {
+      const entry = entries.get(target.key);
+      if (!entry) continue; // resolved elsewhere meanwhile
+      try {
+        const u = await rejectEntry(entry, false);
+        if (u) undo.push(u);
+      } catch (e) {
+        failed.push(`${path.basename(target.path)}: ${e.message || e}`);
+      }
     }
+  } finally {
+    record('Reject all', undo);
+    refreshNow();
   }
-  record('Reject all', undo);
-  refreshNow();
   if (failed.length) vscode.window.showErrorMessage(`Could not reject: ${failed.join('; ')}`);
   else offerUndo(`Rejected ${plural(total, 'change')} in ${plural(keys.length, 'file')}.`);
 }
@@ -1119,6 +1199,7 @@ async function setupHook(context) {
   try {
     const done = setup.install({ bundledHook: bundled, acceptEdits });
     for (const line of done) log.info(line);
+    hookReportsLanding = true;
     vscode.window.showInformationMessage('Claude Code is connected. New Claude Code sessions will show their edits here for review.');
   } catch (e) {
     vscode.window.showErrorMessage(`Setup failed: ${e.message || e}`);
@@ -1135,13 +1216,33 @@ function checkHook(context) {
     log.warn(`Hook check failed: ${e.message || e}`);
     return;
   }
-  if (st.installedVersion && !st.upToDate) {
+  hookReportsLanding = st.complete;
+  if (st.outdated) {
     try {
       setup.installHookScript(bundled);
       log.info(`Updated the Claude Code hook from ${st.installedVersion} to ${st.bundledVersion}`);
     } catch (e) {
       log.warn(`Could not update the hook: ${e.message || e}`);
     }
+  }
+  if (st.configured && !st.complete && !st.settingsError && !context.globalState.get('claudeReview.upgradeDismissed')) {
+    vscode.window
+      .showInformationMessage(
+        'Claude Inline Review: update the Claude Code hook settings? This adds a PostToolUse entry so a review survives a long permission prompt.',
+        'Update',
+        'Not now',
+        "Don't ask again"
+      )
+      .then((pick) => {
+        if (pick === 'Update') {
+          try {
+            for (const line of setup.install({ bundledHook: bundled })) log.info(line);
+            hookReportsLanding = true;
+          } catch (e) {
+            vscode.window.showErrorMessage(`Could not update the settings: ${e.message || e}`);
+          }
+        } else if (pick === "Don't ask again") context.globalState.update('claudeReview.upgradeDismissed', true);
+      });
   }
   if (!st.configured && !st.settingsError && !context.globalState.get('claudeReview.setupDismissed')) {
     vscode.window
@@ -1214,7 +1315,7 @@ function activate(context) {
   ui.fileStatus = [ui.prev, ui.position, ui.next, ui.acceptFileItem, ui.rejectFileItem];
   ui.status = [ui.summary, ...ui.fileStatus];
 
-  const baselineWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*.json'));
+  const baselineWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*.{json,landed}'));
   const reload = () => scheduleRefresh(true);
   const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*');
   const onFile = (uri) => {
@@ -1322,7 +1423,7 @@ function activate(context) {
     let sig = '';
     try {
       for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.json')) sig += f + ':' + fs.statSync(path.join(dir, f)).mtimeMs + ';';
+        if (f.endsWith('.json') || f.endsWith('.landed')) sig += f + ':' + fs.statSync(path.join(dir, f)).mtimeMs + ';';
       }
     } catch {
       /* directory gone */

@@ -54,23 +54,32 @@ function readSettings(file) {
  * @param {any} settings mutated in place
  * @param {{ command: string, acceptEdits?: boolean }} opts
  */
+const EVENTS = ['PreToolUse', 'PostToolUse'];
+
+function hasOurHook(settings, event) {
+  const groups = settings && settings.hooks && Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
+  return groups.some((g) => Array.isArray(g && g.hooks) && g.hooks.some((h) => isOurCommand(h && h.command)));
+}
+
 function mergeSettings(settings, { command, acceptEdits = false }) {
   const notes = [];
   settings.hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {};
-  const groups = Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : [];
-  settings.hooks.PreToolUse = groups;
-  const ours = groups.find((g) => Array.isArray(g && g.hooks) && g.hooks.some((h) => isOurCommand(h && h.command)));
-  if (!ours) {
-    groups.push({ matcher: MATCHER, hooks: [{ type: 'command', command }] });
-    notes.push('added the review hook');
-  } else if (ours.matcher !== MATCHER) {
-    if (ours.hooks.length === 1) {
-      ours.matcher = MATCHER;
-    } else {
-      ours.hooks = ours.hooks.filter((h) => !isOurCommand(h && h.command));
+  for (const event of EVENTS) {
+    const groups = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : [];
+    settings.hooks[event] = groups;
+    const ours = groups.find((g) => Array.isArray(g && g.hooks) && g.hooks.some((h) => isOurCommand(h && h.command)));
+    if (!ours) {
       groups.push({ matcher: MATCHER, hooks: [{ type: 'command', command }] });
+      notes.push(`added the review hook (${event})`);
+    } else if (ours.matcher !== MATCHER) {
+      if (ours.hooks.length === 1) {
+        ours.matcher = MATCHER;
+      } else {
+        ours.hooks = ours.hooks.filter((h) => !isOurCommand(h && h.command));
+        groups.push({ matcher: MATCHER, hooks: [{ type: 'command', command }] });
+      }
+      notes.push(`set the ${event} hook matcher to ${MATCHER}`);
     }
-    notes.push(`set the hook matcher to ${MATCHER}`);
   }
   if (acceptEdits) {
     settings.permissions = settings.permissions && typeof settings.permissions === 'object' ? settings.permissions : {};
@@ -84,17 +93,20 @@ function mergeSettings(settings, { command, acceptEdits = false }) {
 
 /** Removes every hook entry that runs this hook script. */
 function unmergeSettings(settings) {
-  const groups = settings && settings.hooks && Array.isArray(settings.hooks.PreToolUse) ? settings.hooks.PreToolUse : null;
-  if (!groups) return false;
+  if (!settings || !settings.hooks || typeof settings.hooks !== 'object') return false;
   let removed = false;
-  for (const g of groups) {
-    if (!Array.isArray(g && g.hooks)) continue;
-    const kept = g.hooks.filter((h) => !isOurCommand(h && h.command));
-    if (kept.length !== g.hooks.length) removed = true;
-    g.hooks = kept;
+  for (const event of EVENTS) {
+    const groups = Array.isArray(settings.hooks[event]) ? settings.hooks[event] : null;
+    if (!groups) continue;
+    for (const g of groups) {
+      if (!Array.isArray(g && g.hooks)) continue;
+      const kept = g.hooks.filter((h) => !isOurCommand(h && h.command));
+      if (kept.length !== g.hooks.length) removed = true;
+      g.hooks = kept;
+    }
+    settings.hooks[event] = groups.filter((g) => !Array.isArray(g && g.hooks) || g.hooks.length > 0);
+    if (settings.hooks[event].length === 0) delete settings.hooks[event];
   }
-  settings.hooks.PreToolUse = groups.filter((g) => !Array.isArray(g && g.hooks) || g.hooks.length > 0);
-  if (settings.hooks.PreToolUse.length === 0) delete settings.hooks.PreToolUse;
   if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
   return removed;
 }
@@ -102,27 +114,51 @@ function unmergeSettings(settings) {
 function writeSettings(file, settings, { backup = true } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let backupPath = null;
-  if (backup && fs.existsSync(file)) {
-    backupPath = `${file}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-    fs.copyFileSync(file, backupPath);
+  // Write through a symlink (dotfiles repos), and keep the file's permissions:
+  // settings.json can hold secrets in "env".
+  let target = file;
+  let mode = 0o600;
+  if (fs.existsSync(file)) {
+    target = fs.realpathSync(file);
+    mode = fs.statSync(target).mode & 0o777;
+    if (backup) {
+      backupPath = `${file}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      fs.copyFileSync(target, backupPath);
+      fs.chmodSync(backupPath, mode);
+    }
   }
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', { mode });
+  fs.chmodSync(tmp, mode);
+  fs.renameSync(tmp, target);
   return backupPath;
 }
 
-/** Copies the bundled hook into place. */
+/** Copies the bundled hook into place, atomically: a hook starting right now reads the old or the new file, never half of one. */
 function installHookScript(bundledHook, dir = claudeDir()) {
   const dest = hookPath(dir);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(bundledHook, dest);
+  const tmp = `${dest}.${process.pid}.tmp`;
+  fs.copyFileSync(bundledHook, tmp);
   try {
-    fs.chmodSync(dest, 0o755);
+    fs.chmodSync(tmp, 0o755);
   } catch {
     /* not supported */
   }
+  fs.renameSync(tmp, dest);
   return dest;
+}
+
+/** -1, 0, 1 for dotted versions; "legacy" (v0.2) is older than any. */
+function compareVersions(a, b) {
+  const parts = (v) => (v === 'legacy' ? [0] : String(v).split('.').map(Number));
+  const x = parts(a);
+  const y = parts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] || 0) - (y[i] || 0);
+    if (d) return Math.sign(d);
+  }
+  return 0;
 }
 
 /**
@@ -139,12 +175,13 @@ function status(bundledHook, dir = claudeDir()) {
     /* not installed */
   }
   let configured = false;
+  let complete = false;
   let mode;
   let settingsError = null;
   try {
     const s = readSettings(settingsPath(dir));
-    const groups = s.hooks && Array.isArray(s.hooks.PreToolUse) ? s.hooks.PreToolUse : [];
-    configured = groups.some((g) => Array.isArray(g && g.hooks) && g.hooks.some((h) => isOurCommand(h && h.command)));
+    configured = hasOurHook(s, 'PreToolUse');
+    complete = configured && hasOurHook(s, 'PostToolUse');
     mode = s.permissions && s.permissions.defaultMode;
   } catch (e) {
     settingsError = e.message;
@@ -154,7 +191,11 @@ function status(bundledHook, dir = claudeDir()) {
     installedVersion,
     bundledVersion,
     upToDate: installedVersion === bundledVersion,
+    /** The installed hook is ours and older than the bundled one. */
+    outdated: !!installedVersion && compareVersions(installedVersion, bundledVersion) < 0,
     configured,
+    /** Both PreToolUse and PostToolUse are wired. */
+    complete,
     defaultMode: mode,
     settingsError,
   };
@@ -217,6 +258,7 @@ module.exports = {
   settingsPath,
   hookCommand,
   hookVersion,
+  compareVersions,
   readSettings,
   mergeSettings,
   unmergeSettings,

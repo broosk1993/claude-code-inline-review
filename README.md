@@ -28,7 +28,9 @@ Claude's, and every decision can be undone.
 1. A Claude Code **PreToolUse hook** (`Edit`, `MultiEdit`, `Write`) saves the
    file as it is *before* Claude's first edit — the *baseline* — in
    `~/.claude/review/baselines` (outside your project; nothing to gitignore).
-   Later edits pile into the same review until you've reviewed it.
+   Later edits pile into the same review until you've reviewed it. The same
+   script, as a **PostToolUse** hook, marks the write as landed, so a review
+   waiting on a long permission prompt is not mistaken for an abandoned one.
 2. The extension diffs each file against its baseline (Myers diff, with
    readable hunk placement and word-level detail) and draws the result.
 3. **Accept** moves Claude's lines into the baseline. **Reject** puts the
@@ -45,7 +47,8 @@ node install.js --accept-edits # or decide up front (--keep-mode to leave it)
 ```
 
 It copies the hook to `~/.claude/hooks/`, adds it to `~/.claude/settings.json`
-(after a backup; an unreadable settings file is never touched) and installs the
+(after a backup; an unreadable settings file is never touched, a symlinked one
+is written through, its permissions kept) and installs the
 extension into every Cursor / VS Code / VSCodium / Windsurf it finds. Reload the
 editor window and restart Claude Code.
 
@@ -86,6 +89,13 @@ to your theme's diff colors).
 - Editors give extensions no way to insert real lines between lines, so removed
   code is drawn with the comment widget — the same block, slightly different
   chrome from Cursor's.
+- While a review is pending, changes to the file from *other* tools that
+  reload it from disk (`git checkout`, a formatter run in a terminal) look like
+  Claude's. Your own typing never does. Rejecting a review older than a day
+  asks first, because the file may have moved on for other reasons.
+- A change that only converts line endings (CRLF ↔ LF) is not shown.
+- A change on line 1 draws its removed code just below line 1: the comment
+  widget cannot sit above the first line.
 - `Ctrl+Z` does not undo an *accept* (accepting does not touch the file); use
   "Undo last review action".
 - Text files only; binary files and files over 8 MB are skipped.

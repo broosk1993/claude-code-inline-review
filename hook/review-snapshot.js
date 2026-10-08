@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // claude-inline-review hook v0.3.0
 //
-// Claude Code PreToolUse hook for Edit, MultiEdit and Write. Before Claude
-// changes a file, saves the file as it is now as the "review baseline". Only
-// the first edit since the last review makes one, so later edits pile up into
-// the same pending review, as in Cursor. The editor extension "Claude Inline
-// Review" diffs each file against its baseline and shows the change inline
-// with Accept / Reject.
+// Claude Code hook for Edit, MultiEdit and Write.
+//
+// PreToolUse: before Claude changes a file, saves the file as it is now as
+// the "review baseline". Only the first edit since the last review makes one,
+// so later edits pile up into the same pending review, as in Cursor. The
+// editor extension "Claude Inline Review" diffs each file against its
+// baseline and shows the change inline with Accept / Reject.
+//
+// PostToolUse: touches a "<baseline>.landed" marker, so the extension knows
+// Claude's write happened. Until then a baseline with no difference is a
+// write still waiting (on a permission prompt, say), not an abandoned one.
 //
 // Baselines live in ~/.claude/review/baselines (or $CLAUDE_REVIEW_DIR),
 // outside your project: nothing to gitignore. This hook never blocks a tool
@@ -44,18 +49,33 @@ function realPath(p) {
   }
 }
 
-function snapshot(data) {
-  if (data.tool_name && !TOOLS.has(data.tool_name)) return;
+/** The baseline file for this tool call, and whether one (under either name) exists. */
+function locate(data) {
+  if (data.tool_name && !TOOLS.has(data.tool_name)) return null;
   const input = data.tool_input || {};
   const filePath = input.file_path;
-  if (typeof filePath !== 'string' || !filePath) return;
-
+  if (typeof filePath !== 'string' || !filePath) return null;
   const given = path.resolve(data.cwd || process.cwd(), filePath);
   const abs = realPath(given);
   const dir = baselineDir();
   const target = path.join(dir, fileNameFor(abs));
-  // A review is already pending for this file (v0.2 keyed it by the unresolved path).
-  if (fs.existsSync(target) || (given !== abs && fs.existsSync(path.join(dir, fileNameFor(given))))) return;
+  // v0.2 keyed baselines by the unresolved path.
+  const legacy = given !== abs ? path.join(dir, fileNameFor(given)) : null;
+  const existing = fs.existsSync(target) ? target : legacy && fs.existsSync(legacy) ? legacy : null;
+  return { abs, dir, target, existing };
+}
+
+/** PostToolUse: mark the baseline's write as landed. */
+function landed(data) {
+  const loc = locate(data);
+  if (!loc || !loc.existing) return;
+  fs.writeFileSync(loc.existing.replace(/\.json$/, '.landed'), String(Date.now()));
+}
+
+function snapshot(data) {
+  const loc = locate(data);
+  if (!loc || loc.existing) return; // nothing to track, or a review is already pending
+  const { abs, dir, target } = loc;
 
   let existed = false;
   let content = '';
@@ -101,7 +121,9 @@ function main() {
   process.stdin.on('data', (d) => (input += d));
   process.stdin.on('end', () => {
     try {
-      snapshot(JSON.parse(input));
+      const data = JSON.parse(input);
+      if (data.hook_event_name === 'PostToolUse') landed(data);
+      else snapshot(data);
     } catch {
       // Never block Claude because of the review tool.
     }
@@ -112,4 +134,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { snapshot, fileNameFor, baselineDir };
+module.exports = { snapshot, landed, fileNameFor, baselineDir };

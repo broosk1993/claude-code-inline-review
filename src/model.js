@@ -58,18 +58,41 @@ function absorbUserEdits(baseline, hunks, changes, eol) {
   return changed ? lines.join(eol) : null;
 }
 
+/** Offset where each line starts (as many entries as splitLines returns lines). */
+function lineStarts(text) {
+  const starts = [0];
+  const re = /\r\n|\n/g;
+  let m;
+  while ((m = re.exec(text))) starts.push(m.index + m[0].length);
+  return starts;
+}
+
+/**
+ * Replaces lines [start, start + count) of `text` with `lines`. Every other
+ * character, line endings included, is kept as it was, so a mixed-ending file
+ * is not rewritten; new lines end with `eol`.
+ */
+function replaceLines(text, start, count, lines, eol) {
+  const starts = lineStarts(text);
+  const n = starts.length;
+  const end = start + count;
+  if (start >= n) return text + lines.map((l) => eol + l).join(''); // after the last line
+  if (end < n) return text.slice(0, starts[start]) + lines.map((l) => l + eol).join('') + text.slice(starts[end]);
+  // The range runs to the last line, which has no line ending of its own.
+  if (lines.length) return text.slice(0, starts[start]) + lines.join(eol);
+  if (start === 0) return '';
+  const cut = text.slice(starts[start] - 2, starts[start]) === '\r\n' ? 2 : 1;
+  return text.slice(0, starts[start] - cut);
+}
+
 /** Keeping a hunk: the baseline takes Claude's lines. */
 function acceptHunkInBaseline(baseline, hunk, eol) {
-  const a = splitLines(baseline);
-  a.splice(hunk.aStart, hunk.aLines.length, ...hunk.bLines);
-  return a.join(eol);
+  return replaceLines(baseline, hunk.aStart, hunk.aLines.length, hunk.bLines, eol);
 }
 
 /** Rejecting a hunk: the file takes the baseline's lines back. */
 function rejectHunkInText(text, hunk, eol) {
-  const b = splitLines(text);
-  b.splice(hunk.bStart, hunk.bLines.length, ...hunk.aLines);
-  return b.join(eol);
+  return replaceLines(text, hunk.bStart, hunk.bLines.length, hunk.aLines, eol);
 }
 
 /**
@@ -129,6 +152,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 module.exports = {
   absorbUserEdits,
+  replaceLines,
   acceptHunkInBaseline,
   rejectHunkInText,
   minimalEdit,
