@@ -49,7 +49,7 @@ test('hook resolves relative paths against cwd and records new files', () => {
   const dir = path.join(root, 'b');
   runHook({ tool_name: 'Write', tool_input: { file_path: 'new.txt' }, cwd: root }, { CLAUDE_REVIEW_DIR: dir });
   const [entry] = store.loadEntries(dir).values();
-  assert.equal(entry.path, path.join(fs.realpathSync(root), 'new.txt'));
+  assert.equal(entry.path, path.join(fs.realpathSync.native(root), 'new.txt'));
   assert.equal(entry.existed, false);
   assert.equal(entry.content, '');
 });
