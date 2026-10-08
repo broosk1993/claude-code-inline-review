@@ -64,6 +64,24 @@ function onPath(cmd) {
   return r.status === 0 ? r.stdout.split(/\r?\n/)[0].trim() : null;
 }
 
+/**
+ * An editor's CLI launcher is a script (or .cmd). Inside an AppImage the
+ * name can resolve to the app binary itself, which does not install anything:
+ * it hands the arguments to the running editor, which opens a window.
+ */
+function isCliLauncher(file) {
+  if (process.platform === 'win32') return true;
+  try {
+    const fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(4);
+    fs.readSync(fd, head, 0, 4, 0);
+    fs.closeSync(fd);
+    return head.toString('latin1', 0, 2) === '#!';
+  } catch {
+    return false;
+  }
+}
+
 /** A CLI run from inside an editor terminal must not hand the job to that editor. */
 function cleanEnv() {
   const env = { ...process.env };
@@ -71,10 +89,11 @@ function cleanEnv() {
   return env;
 }
 
-function removeOldCopies(extDir) {
+/** Removes this extension's folders, except the version given. */
+function removeOldCopies(extDir, keepVersion) {
   let removed = 0;
   for (const name of fs.readdirSync(extDir)) {
-    if (name.startsWith(EXTENSION_ID + '-')) {
+    if (name.startsWith(EXTENSION_ID + '-') && name !== `${EXTENSION_ID}-${keepVersion}`) {
       fs.rmSync(path.join(extDir, name), { recursive: true, force: true });
       removed++;
     }
@@ -100,20 +119,25 @@ function installExtension() {
   const done = [];
   for (const ed of EDITORS) {
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
-    const cli = onPath(ed.cli);
-    const hasDir = fs.existsSync(path.join(os.homedir(), ed.dir));
+    const found = onPath(ed.cli);
+    const cli = found && isCliLauncher(found) ? found : null;
+    // An editor that is really in use has extensions installed; a leftover
+    // config folder with an empty registry is not worth installing into.
+    const hasDir = fs.existsSync(extDir) && fs.readdirSync(extDir).some((n) => n !== 'extensions.json' && !n.startsWith('.') && !n.startsWith(EXTENSION_ID));
     if (!cli && !hasDir) continue;
-    if (fs.existsSync(extDir)) removeOldCopies(extDir);
     if (cli && vsix) {
+      // Let the editor replace its own registered copy; only then clear out
+      // older folders (removing a registered one first makes the CLI fail).
       const r = spawnSync(cli, ['--install-extension', vsix, '--force'], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
       if (r.status === 0) {
+        if (fs.existsSync(extDir)) removeOldCopies(extDir, version);
         done.push(`${ed.label} (via ${ed.cli})`);
         continue;
       }
       warn(`${ed.cli} --install-extension failed (${(r.stderr || r.stdout || '').trim().split('\n').pop()}); copying instead`);
     }
     if (hasDir) {
-      fs.mkdirSync(extDir, { recursive: true });
+      removeOldCopies(extDir, null);
       copyExtension(extDir, version);
       done.push(`${ed.label} (copied into ~/${ed.dir}/extensions)`);
     }
@@ -124,10 +148,10 @@ function installExtension() {
 
 function uninstallExtension() {
   for (const ed of EDITORS) {
-    const cli = onPath(ed.cli);
-    if (cli) spawnSync(cli, ['--uninstall-extension', EXTENSION_ID], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
+    const found = onPath(ed.cli);
+    if (found && isCliLauncher(found)) spawnSync(found, ['--uninstall-extension', EXTENSION_ID], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
-    if (fs.existsSync(extDir) && removeOldCopies(extDir)) ok(`Extension removed from ${ed.label}`);
+    if (fs.existsSync(extDir) && removeOldCopies(extDir, null)) ok(`Extension removed from ${ed.label}`);
   }
 }
 
