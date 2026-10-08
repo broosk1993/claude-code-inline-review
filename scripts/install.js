@@ -117,7 +117,29 @@ function removeOldCopies(extDir, keepVersion) {
  * @param {string | null} version null to remove the entry
  */
 function register(extDir, version) {
-  const file = path.join(extDir, 'extensions.json');
+  updateRegistry(path.join(extDir, 'extensions.json'), extDir, version, { add: true });
+}
+
+/**
+ * Each editor profile other than the default keeps its own registry
+ * (<app data>/User/profiles/<id>/extensions.json). A profile that lists this
+ * extension must follow the copy too, or that profile keeps looking for the
+ * old folder. Profiles that never had it are left as they are.
+ */
+function registerInProfiles(app, extDir, version) {
+  const root = path.join(appDataDir(app), 'User', 'profiles');
+  let profiles = [];
+  try {
+    profiles = fs.readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const profile of profiles) {
+    updateRegistry(path.join(root, profile, 'extensions.json'), extDir, version, { add: false });
+  }
+}
+
+function updateRegistry(file, extDir, version, { add }) {
   if (!fs.existsSync(file)) return; // the editor scans the folder itself
   let list;
   try {
@@ -127,7 +149,10 @@ function register(extDir, version) {
     return;
   }
   if (!Array.isArray(list)) return;
-  list = list.filter((e) => !(e && e.identifier && String(e.identifier.id).toLowerCase() === EXTENSION_ID));
+  const ours = (e) => e && e.identifier && String(e.identifier.id).toLowerCase() === EXTENSION_ID;
+  const had = list.some(ours);
+  if (!had && !add) return;
+  list = list.filter((e) => !ours(e));
   if (version) {
     const folder = `${EXTENSION_ID}-${version}`;
     const location = path.join(extDir, folder);
@@ -211,6 +236,7 @@ function installExtension() {
       removeOldCopies(extDir, null);
       copyExtension(extDir, version);
       register(extDir, version);
+      registerInProfiles(ed.app, extDir, version);
       dropScanCache(ed.app);
       done.push(`${ed.label} (copied into ~/${ed.dir}/extensions)`);
       restartNeeded.push(ed.label);
@@ -231,6 +257,7 @@ function uninstallExtension() {
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
     if (fs.existsSync(extDir) && removeOldCopies(extDir, null)) {
       register(extDir, null);
+      registerInProfiles(ed.app, extDir, null);
       dropScanCache(ed.app);
       ok(`Extension removed from ${ed.label}`);
     }
