@@ -21,6 +21,7 @@ const os = require('os');
 const path = require('path');
 const readline = require('readline');
 const { spawnSync } = require('child_process');
+const { pathToFileURL } = require('url');
 
 const here = __dirname;
 const firstExisting = (...candidates) => candidates.find((p) => fs.existsSync(p));
@@ -32,13 +33,21 @@ const args = new Set(process.argv.slice(2));
 const ok = (msg) => console.log('✔ ' + msg);
 const warn = (msg) => console.log('! ' + msg);
 
+// dir: where extensions live (~/<dir>/extensions); app: the editor's data
+// folder name (~/.config/<app> on Linux), which holds its extension caches.
 const EDITORS = [
-  { label: 'Cursor', cli: 'cursor', dir: '.cursor' },
-  { label: 'VS Code', cli: 'code', dir: '.vscode' },
-  { label: 'VS Code Insiders', cli: 'code-insiders', dir: '.vscode-insiders' },
-  { label: 'VSCodium', cli: 'codium', dir: '.vscode-oss' },
-  { label: 'Windsurf', cli: 'windsurf', dir: '.windsurf' },
+  { label: 'Cursor', cli: 'cursor', dir: '.cursor', app: 'Cursor' },
+  { label: 'VS Code', cli: 'code', dir: '.vscode', app: 'Code' },
+  { label: 'VS Code Insiders', cli: 'code-insiders', dir: '.vscode-insiders', app: 'Code - Insiders' },
+  { label: 'VSCodium', cli: 'codium', dir: '.vscode-oss', app: 'VSCodium' },
+  { label: 'Windsurf', cli: 'windsurf', dir: '.windsurf', app: 'Windsurf' },
 ];
+
+function appDataDir(app) {
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), app);
+  if (process.platform === 'darwin') return path.join(os.homedir(), 'Library', 'Application Support', app);
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), app);
+}
 
 function findVsix() {
   for (const dir of [here, path.join(here, '../dist')]) {
@@ -101,6 +110,67 @@ function removeOldCopies(extDir, keepVersion) {
   return removed;
 }
 
+/**
+ * Points the editor's extension registry (extensions/extensions.json) at the
+ * copied folder. Without this an editor that already registered an older
+ * copy keeps looking for that folder. An unreadable registry is left alone.
+ * @param {string | null} version null to remove the entry
+ */
+function register(extDir, version) {
+  const file = path.join(extDir, 'extensions.json');
+  if (!fs.existsSync(file)) return; // the editor scans the folder itself
+  let list;
+  try {
+    list = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    warn(`${file} is not valid JSON; not touched`);
+    return;
+  }
+  if (!Array.isArray(list)) return;
+  list = list.filter((e) => !(e && e.identifier && String(e.identifier.id).toLowerCase() === EXTENSION_ID));
+  if (version) {
+    const folder = `${EXTENSION_ID}-${version}`;
+    const location = path.join(extDir, folder);
+    const url = pathToFileURL(location);
+    list.push({
+      identifier: { id: EXTENSION_ID },
+      version,
+      location: { $mid: 1, fsPath: location, external: url.href, path: url.pathname, scheme: 'file' },
+      relativeLocation: folder,
+      metadata: { installedTimestamp: Date.now(), pinned: true, source: 'vsix' },
+    });
+  }
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(list));
+  fs.renameSync(tmp, file);
+}
+
+/**
+ * Drops the editor's cached scan of installed extensions. It is rebuilt on
+ * the next start; left in place it can describe a folder that no longer
+ * exists, and the editor then loads no version at all.
+ */
+function dropScanCache(app) {
+  const root = path.join(appDataDir(app), 'CachedProfilesData');
+  let dropped = 0;
+  let profiles = [];
+  try {
+    profiles = fs.readdirSync(root);
+  } catch {
+    return 0;
+  }
+  for (const profile of profiles) {
+    const cache = path.join(root, profile, 'extensions.user.cache');
+    try {
+      fs.unlinkSync(cache);
+      dropped++;
+    } catch {
+      /* none for this profile */
+    }
+  }
+  return dropped;
+}
+
 function copyExtension(extDir, version) {
   const src = path.dirname(findUnpacked());
   const dest = path.join(extDir, `${EXTENSION_ID}-${version}`);
@@ -121,6 +191,7 @@ function installExtension() {
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
     const found = onPath(ed.cli);
     const cli = found && isCliLauncher(found) ? found : null;
+    if (!cli && !fs.existsSync(extDir)) continue;
     // An editor that is really in use has extensions installed; a leftover
     // config folder with an empty registry is not worth installing into.
     const hasDir = fs.existsSync(extDir) && fs.readdirSync(extDir).some((n) => n !== 'extensions.json' && !n.startsWith('.') && !n.startsWith(EXTENSION_ID));
@@ -139,19 +210,30 @@ function installExtension() {
     if (hasDir) {
       removeOldCopies(extDir, null);
       copyExtension(extDir, version);
+      register(extDir, version);
+      dropScanCache(ed.app);
       done.push(`${ed.label} (copied into ~/${ed.dir}/extensions)`);
+      restartNeeded.push(ed.label);
     }
   }
   if (done.length) ok('Extension installed for: ' + done.join(', '));
   else warn('No Cursor or VS Code found. Install the .vsix from the editor: Extensions: Install from VSIX…');
+  return done;
 }
+
+/** Editors installed by copying: they only pick the copy up after a full restart (Reload Window reuses the old scan). */
+const restartNeeded = [];
 
 function uninstallExtension() {
   for (const ed of EDITORS) {
     const found = onPath(ed.cli);
     if (found && isCliLauncher(found)) spawnSync(found, ['--uninstall-extension', EXTENSION_ID], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
-    if (fs.existsSync(extDir) && removeOldCopies(extDir, null)) ok(`Extension removed from ${ed.label}`);
+    if (fs.existsSync(extDir) && removeOldCopies(extDir, null)) {
+      register(extDir, null);
+      dropScanCache(ed.app);
+      ok(`Extension removed from ${ed.label}`);
+    }
   }
 }
 
@@ -192,7 +274,8 @@ async function main() {
     for (const line of setup.install({ bundledHook: HOOK, acceptEdits })) ok(line);
   }
   if (!args.has('--no-extension')) installExtension();
-  console.log('\nDone. Reload editor windows (Developer: Reload Window) and restart Claude Code sessions.');
+  const restart = restartNeeded.length ? `Fully quit and reopen ${restartNeeded.join(', ')} (Reload Window is not enough there); reload other editor windows` : 'Reload editor windows (Developer: Reload Window)';
+  console.log(`\nDone. ${restart}, and restart Claude Code sessions.`);
 }
 
 main().catch((e) => {
