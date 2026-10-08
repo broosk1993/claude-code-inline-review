@@ -1,0 +1,9 @@
+.gitignore
+.vscode-test/**
+dist/**
+node_modules/**
+scripts/**
+test/**
+jsconfig.json
+**/*.vsix
+**/*.tmp

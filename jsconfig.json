@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "lib": [
+      "ES2022"
+    ],
+    "checkJs": true,
+    "allowJs": true,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "types": [
+      "node",
+      "vscode"
+    ],
+    "maxNodeModuleJsDepth": 0,
+    "resolveJsonModule": true
+  },
+  "include": [
+    "src/**/*.js",
+    "hook/**/*.js",
+    "scripts/**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".vscode-test"
+  ]
+}

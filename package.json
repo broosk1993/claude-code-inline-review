@@ -1,0 +1,490 @@
+{
+  "name": "claude-inline-review",
+  "displayName": "Claude Inline Review",
+  "description": "Cursor-style inline review of Claude Code edits in Cursor and VS Code: green added code, red removed code, word-level highlights, Accept / Reject per change, per file or everything, with undo.",
+  "version": "0.3.0",
+  "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/local/claude-inline-review"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "review",
+    "inline diff",
+    "ai"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "scripts": {
+    "test": "npm run test:unit && npm run typecheck",
+    "test:unit": "node --test --test-reporter=spec \"test/unit/*.test.js\"",
+    "test:e2e": "node test/e2e/run.js",
+    "typecheck": "tsc -p jsconfig.json",
+    "package": "node scripts/build.js",
+    "install-local": "node scripts/install.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeReview.acceptHunk",
+        "title": "Accept change",
+        "icon": "$(check)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.rejectHunk",
+        "title": "Reject change",
+        "icon": "$(discard)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.acceptFile",
+        "title": "Accept all changes in file",
+        "shortTitle": "Accept file",
+        "icon": "$(check-all)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.rejectFile",
+        "title": "Reject all changes in file",
+        "shortTitle": "Reject file",
+        "icon": "$(close-all)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.acceptAll",
+        "title": "Accept all changes (all files)",
+        "icon": "$(check-all)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.rejectAll",
+        "title": "Reject all changes (all files)",
+        "icon": "$(close-all)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.undo",
+        "title": "Undo last review action",
+        "icon": "$(discard)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.nextHunk",
+        "title": "Next change",
+        "icon": "$(arrow-down)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.prevHunk",
+        "title": "Previous change",
+        "icon": "$(arrow-up)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.nextFile",
+        "title": "Next file with changes",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.prevFile",
+        "title": "Previous file with changes",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.showDiff",
+        "title": "Show before/after diff",
+        "icon": "$(diff)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.openChanges",
+        "title": "Open all changes in one diff",
+        "icon": "$(diff-multiple)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.listFiles",
+        "title": "List files to review",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.setupHook",
+        "title": "Set up Claude Code hook",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.openFile",
+        "title": "Open file at first change",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.revealHunk",
+        "title": "Show change",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.acceptThread",
+        "title": "Accept",
+        "icon": "$(check)",
+        "category": "Claude Review"
+      },
+      {
+        "command": "claudeReview.rejectThread",
+        "title": "Reject",
+        "icon": "$(discard)",
+        "category": "Claude Review"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "claudeReview.acceptHunk",
+        "key": "ctrl+y",
+        "mac": "cmd+y",
+        "when": "editorTextFocus && claudeReview.cursorInChange && config.claudeReview.cursorStyleKeybindings"
+      },
+      {
+        "command": "claudeReview.rejectHunk",
+        "key": "ctrl+n",
+        "mac": "cmd+n",
+        "when": "editorTextFocus && claudeReview.cursorInChange && config.claudeReview.cursorStyleKeybindings"
+      },
+      {
+        "command": "claudeReview.acceptHunk",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "editorTextFocus && claudeReview.activeFileHasChanges"
+      },
+      {
+        "command": "claudeReview.rejectHunk",
+        "key": "ctrl+alt+backspace",
+        "mac": "cmd+alt+backspace",
+        "when": "editorTextFocus && claudeReview.activeFileHasChanges"
+      },
+      {
+        "command": "claudeReview.acceptFile",
+        "key": "ctrl+shift+alt+enter",
+        "mac": "cmd+shift+alt+enter",
+        "when": "editorTextFocus && claudeReview.activeFileHasChanges"
+      },
+      {
+        "command": "claudeReview.rejectFile",
+        "key": "ctrl+shift+alt+backspace",
+        "mac": "cmd+shift+alt+backspace",
+        "when": "editorTextFocus && claudeReview.activeFileHasChanges"
+      },
+      {
+        "command": "claudeReview.nextHunk",
+        "key": "ctrl+alt+down",
+        "mac": "cmd+alt+down",
+        "when": "editorTextFocus && claudeReview.hasChanges"
+      },
+      {
+        "command": "claudeReview.prevHunk",
+        "key": "ctrl+alt+up",
+        "mac": "cmd+alt+up",
+        "when": "editorTextFocus && claudeReview.hasChanges"
+      }
+    ],
+    "views": {
+      "scm": [
+        {
+          "id": "claudeReview.changes",
+          "name": "Claude Changes",
+          "icon": "$(sparkle)",
+          "contextualTitle": "Claude Changes"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "claudeReview.changes",
+        "contents": "No Claude changes waiting for review.\nWhen Claude Code edits a file, the change shows up here and inline in the editor.\n[Set up Claude Code hook](command:claudeReview.setupHook)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "claudeReview.prevHunk",
+          "group": "navigation@1",
+          "when": "resourceScheme == file && claudeReview.activeFileHasChanges"
+        },
+        {
+          "command": "claudeReview.nextHunk",
+          "group": "navigation@2",
+          "when": "resourceScheme == file && claudeReview.activeFileHasChanges"
+        },
+        {
+          "command": "claudeReview.acceptFile",
+          "group": "navigation@3",
+          "when": "resourceScheme == file && claudeReview.activeFileHasChanges"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "group": "navigation@4",
+          "when": "resourceScheme == file && claudeReview.activeFileHasChanges"
+        },
+        {
+          "command": "claudeReview.showDiff",
+          "group": "1_claudeReview@1",
+          "when": "resourceScheme == file && claudeReview.activeFileHasChanges"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "claudeReview.acceptHunk",
+          "group": "0_claudeReview@1",
+          "when": "claudeReview.cursorInChange"
+        },
+        {
+          "command": "claudeReview.rejectHunk",
+          "group": "0_claudeReview@2",
+          "when": "claudeReview.cursorInChange"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "claudeReview.showDiff",
+          "group": "7_claudeReview@1",
+          "when": "resourcePath in claudeReview.files"
+        },
+        {
+          "command": "claudeReview.acceptFile",
+          "group": "7_claudeReview@2",
+          "when": "resourcePath in claudeReview.files"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "group": "7_claudeReview@3",
+          "when": "resourcePath in claudeReview.files"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "claudeReview.openChanges",
+          "group": "navigation@1",
+          "when": "view == claudeReview.changes && claudeReview.hasChanges"
+        },
+        {
+          "command": "claudeReview.acceptAll",
+          "group": "navigation@2",
+          "when": "view == claudeReview.changes && claudeReview.hasChanges"
+        },
+        {
+          "command": "claudeReview.rejectAll",
+          "group": "navigation@3",
+          "when": "view == claudeReview.changes && claudeReview.hasChanges"
+        },
+        {
+          "command": "claudeReview.undo",
+          "group": "1_more@1",
+          "when": "view == claudeReview.changes"
+        },
+        {
+          "command": "claudeReview.refresh",
+          "group": "1_more@2",
+          "when": "view == claudeReview.changes"
+        },
+        {
+          "command": "claudeReview.setupHook",
+          "group": "1_more@3",
+          "when": "view == claudeReview.changes"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "claudeReview.showDiff",
+          "group": "inline@1",
+          "when": "view == claudeReview.changes && viewItem =~ /^claudeReview\\.(file|newFile)$/"
+        },
+        {
+          "command": "claudeReview.acceptFile",
+          "group": "inline@2",
+          "when": "view == claudeReview.changes && viewItem =~ /^claudeReview\\.(file|newFile)$/"
+        },
+        {
+          "command": "claudeReview.rejectFile",
+          "group": "inline@3",
+          "when": "view == claudeReview.changes && viewItem =~ /^claudeReview\\.(file|newFile)$/"
+        },
+        {
+          "command": "claudeReview.acceptHunk",
+          "group": "inline@1",
+          "when": "view == claudeReview.changes && viewItem == claudeReview.hunk"
+        },
+        {
+          "command": "claudeReview.rejectHunk",
+          "group": "inline@2",
+          "when": "view == claudeReview.changes && viewItem == claudeReview.hunk"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "claudeReview.acceptThread",
+          "group": "navigation@1",
+          "when": "commentController == claudeReview"
+        },
+        {
+          "command": "claudeReview.rejectThread",
+          "group": "navigation@2",
+          "when": "commentController == claudeReview"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "claudeReview.acceptThread",
+          "when": "false"
+        },
+        {
+          "command": "claudeReview.rejectThread",
+          "when": "false"
+        },
+        {
+          "command": "claudeReview.openFile",
+          "when": "false"
+        },
+        {
+          "command": "claudeReview.revealHunk",
+          "when": "false"
+        },
+        {
+          "command": "claudeReview.refresh",
+          "when": "false"
+        }
+      ]
+    },
+    "colors": [
+      {
+        "id": "claudeReview.addedLineBackground",
+        "description": "Background of lines Claude added or changed.",
+        "defaults": {
+          "dark": "diffEditor.insertedLineBackground",
+          "light": "diffEditor.insertedLineBackground",
+          "highContrast": "diffEditor.insertedLineBackground",
+          "highContrastLight": "diffEditor.insertedLineBackground"
+        }
+      },
+      {
+        "id": "claudeReview.addedTextBackground",
+        "description": "Background of the words Claude changed inside a line.",
+        "defaults": {
+          "dark": "diffEditor.insertedTextBackground",
+          "light": "diffEditor.insertedTextBackground",
+          "highContrast": "diffEditor.insertedTextBackground",
+          "highContrastLight": "diffEditor.insertedTextBackground"
+        }
+      },
+      {
+        "id": "claudeReview.addedLineBorder",
+        "description": "Left border of lines Claude added or changed.",
+        "defaults": {
+          "dark": "editorGutter.addedBackground",
+          "light": "editorGutter.addedBackground",
+          "highContrast": "editorGutter.addedBackground",
+          "highContrastLight": "editorGutter.addedBackground"
+        }
+      },
+      {
+        "id": "claudeReview.removedMarker",
+        "description": "Rule drawn where Claude removed lines.",
+        "defaults": {
+          "dark": "editorGutter.deletedBackground",
+          "light": "editorGutter.deletedBackground",
+          "highContrast": "editorGutter.deletedBackground",
+          "highContrastLight": "editorGutter.deletedBackground"
+        }
+      },
+      {
+        "id": "claudeReview.removedHintForeground",
+        "description": "Text of the 'lines removed' hint when removed code is not drawn inline.",
+        "defaults": {
+          "dark": "editorCodeLens.foreground",
+          "light": "editorCodeLens.foreground",
+          "highContrast": "editorCodeLens.foreground",
+          "highContrastLight": "editorCodeLens.foreground"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Claude Inline Review",
+      "properties": {
+        "claudeReview.showCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Accept / Reject buttons above each change, and file-level buttons at the top of the file."
+        },
+        "claudeReview.showRemovedInline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Draw removed code as a red block inside the file, where it used to be."
+        },
+        "claudeReview.highlightWordChanges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight the exact words Claude changed inside a modified line."
+        },
+        "claudeReview.showHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Hovering a changed line shows the code it replaced and Accept / Reject / Diff links."
+        },
+        "claudeReview.cursorStyleKeybindings": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Use Cursor's keys while the cursor is inside a change: `Ctrl+Y` / `Cmd+Y` accepts it and `Ctrl+N` / `Cmd+N` rejects it. Outside a change those keys keep their usual meaning. `Ctrl+Alt+Enter` / `Ctrl+Alt+Backspace` always work."
+        },
+        "claudeReview.jumpToNextChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "After accepting or rejecting a change, move the cursor to the next change in the file."
+        },
+        "claudeReview.saveAfterReject": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save the file after rejecting a change, so Claude Code reads what you see."
+        },
+        "claudeReview.confirmRejectAll": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask before rejecting every change in every file."
+        },
+        "claudeReview.revealOnEdit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open a file in a preview tab, without taking focus, when Claude starts changing it."
+        },
+        "claudeReview.maxRemovedLinesShown": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "description": "How many removed lines to draw inline or in a hover before cutting off."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "1.85.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.6.3"
+  }
+}
