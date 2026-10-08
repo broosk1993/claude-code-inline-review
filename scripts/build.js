@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Packages the extension (.vsix) and a ready-to-share folder + zip:
-//   dist/claude-inline-review-<version>.vsix
-//   dist/claude-inline-review-<version>/   vsix, installer, hook, unpacked extension, INSTALL.txt
-//   dist/claude-inline-review-<version>.zip
+//   dist/<name>-<version>.vsix
+//   dist/<name>-<version>/   vsix, installer, hook, unpacked extension, INSTALL.txt
+//   dist/<name>-<version>.zip
 
 'use strict';
 
@@ -11,9 +11,9 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const { version } = require('../package.json');
+const { name: packageName, version, displayName } = require('../package.json');
 const dist = path.join(root, 'dist');
-const name = `claude-inline-review-${version}`;
+const name = `${packageName}-${version}`;
 const vsix = path.join(dist, `${name}.vsix`);
 const bundle = path.join(dist, name);
 
@@ -28,7 +28,7 @@ fs.copyFileSync(path.join(root, 'src/setup.js'), path.join(bundle, 'setup.js'));
 fs.copyFileSync(path.join(root, 'hook/review-snapshot.js'), path.join(bundle, 'review-snapshot.js'));
 fs.copyFileSync(path.join(root, 'README.md'), path.join(bundle, 'README.md'));
 const ext = path.join(bundle, 'extension');
-for (const item of ['package.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'src', 'hook']) {
+for (const item of ['package.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'src', 'hook', 'media']) {
   fs.cpSync(path.join(root, item), path.join(ext, item), { recursive: true });
 }
 fs.writeFileSync(
@@ -49,7 +49,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(bundle, 'INSTALL.txt'),
-  `Claude Inline Review ${version}
+  `${displayName} ${version}
 
 Easiest: open a terminal in this folder and run
     node install.js

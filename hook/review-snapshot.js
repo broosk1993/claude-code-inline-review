@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// claude-inline-review hook v0.3.0
+// claude-inline-review hook v0.4.0
 //
 // Claude Code hook for Edit, MultiEdit and Write.
 //
 // PreToolUse: before Claude changes a file, saves the file as it is now as
 // the "review baseline". Only the first edit since the last review makes one,
 // so later edits pile up into the same pending review, as in Cursor. The
-// editor extension "Claude Inline Review" diffs each file against its
+// editor extension "Inline Review for Claude Code" diffs each file against its
 // baseline and shows the change inline with Accept / Reject.
 //
 // PostToolUse: touches a "<baseline>.landed" marker, so the extension knows

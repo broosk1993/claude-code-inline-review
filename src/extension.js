@@ -1228,7 +1228,7 @@ function checkHook(context) {
   if (st.configured && !st.complete && !st.settingsError && !context.globalState.get('claudeReview.upgradeDismissed')) {
     vscode.window
       .showInformationMessage(
-        'Claude Inline Review: update the Claude Code hook settings? This adds a PostToolUse entry so a review survives a long permission prompt.',
+        'Inline Review for Claude Code: update the Claude Code hook settings? This adds a PostToolUse entry so a review survives a long permission prompt.',
         'Update',
         'Not now',
         "Don't ask again"
@@ -1246,7 +1246,7 @@ function checkHook(context) {
   }
   if (!st.configured && !st.settingsError && !context.globalState.get('claudeReview.setupDismissed')) {
     vscode.window
-      .showInformationMessage('Claude Inline Review: connect Claude Code so its edits show up here for review.', 'Set up', 'Not now', "Don't ask again")
+      .showInformationMessage('Inline Review for Claude Code: connect Claude Code so its edits show up here for review.', 'Set up', 'Not now', "Don't ask again")
       .then((pick) => {
         if (pick === 'Set up') setupHook(context);
         else if (pick === "Don't ask again") context.globalState.update('claudeReview.setupDismissed', true);
@@ -1255,6 +1255,18 @@ function checkHook(context) {
 }
 
 // ---------- activation ----------
+
+/** Builds before 0.4.0 were installed by hand under another ID; both running would draw every review twice. */
+function warnAboutLegacyCopy() {
+  const legacyId = 'local.claude-inline-review';
+  if (!vscode.extensions.getExtension(legacyId)) return;
+  vscode.window
+    .showWarningMessage(
+      `An older copy of this extension (${legacyId}) is also installed, so every change would be shown twice. Uninstall it from the Extensions view.`,
+      'Show it'
+    )
+    .then((pick) => pick && vscode.commands.executeCommand('workbench.extensions.search', `@installed ${legacyId}`));
+}
 
 function updateRoots() {
   workspaceRoots = (vscode.workspace.workspaceFolders || []).filter((f) => f.uri.scheme === 'file').map((f) => store.keyOf(f.uri.fsPath));
@@ -1270,7 +1282,7 @@ function statusItem(id, priority, text, command, tooltip) {
 }
 
 function activate(context) {
-  log = vscode.window.createOutputChannel('Claude Inline Review', { log: true });
+  log = vscode.window.createOutputChannel('Inline Review for Claude Code', { log: true });
   const dir = store.baselineDir();
   fs.mkdirSync(dir, { recursive: true });
   updateRoots();
@@ -1438,6 +1450,7 @@ function activate(context) {
   reloadEntries();
   refreshNow();
   checkHook(context);
+  warnAboutLegacyCopy();
   log.info(`Watching ${dir}`);
 
   // For the extension's own tests.

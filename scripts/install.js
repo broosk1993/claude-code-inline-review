@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Inline Review installer.
+// Installer for Inline Review for Claude Code.
 //
 //   node install.js                 hook + settings + extension (asks about acceptEdits)
 //   node install.js --accept-edits  also set permissions.defaultMode = acceptEdits
@@ -27,7 +27,10 @@ const here = __dirname;
 const firstExisting = (...candidates) => candidates.find((p) => fs.existsSync(p));
 const setup = require(firstExisting(path.join(here, 'setup.js'), path.join(here, '../src/setup.js')));
 const HOOK = firstExisting(path.join(here, 'review-snapshot.js'), path.join(here, '../hook/review-snapshot.js'));
-const EXTENSION_ID = 'local.claude-inline-review';
+const EXTENSION_ID = 'broosk1993.claude-code-inline-review';
+// Builds before 0.4.0 were installed by hand under this ID; replaced on install.
+const LEGACY_IDS = ['local.claude-inline-review'];
+const isOurId = (id) => [EXTENSION_ID, ...LEGACY_IDS].includes(String(id).toLowerCase());
 
 const args = new Set(process.argv.slice(2));
 const ok = (msg) => console.log('✔ ' + msg);
@@ -53,7 +56,7 @@ function findVsix() {
   for (const dir of [here, path.join(here, '../dist')]) {
     let names = [];
     try {
-      names = fs.readdirSync(dir).filter((f) => /^claude-inline-review-.*\.vsix$/.test(f));
+      names = fs.readdirSync(dir).filter((f) => /^claude-code-inline-review-.*\.vsix$/.test(f));
     } catch {
       continue;
     }
@@ -102,7 +105,8 @@ function cleanEnv() {
 function removeOldCopies(extDir, keepVersion) {
   let removed = 0;
   for (const name of fs.readdirSync(extDir)) {
-    if (name.startsWith(EXTENSION_ID + '-') && name !== `${EXTENSION_ID}-${keepVersion}`) {
+    const ours = [EXTENSION_ID, ...LEGACY_IDS].some((id) => name.toLowerCase().startsWith(id + '-'));
+    if (ours && name !== `${EXTENSION_ID}-${keepVersion}`) {
       fs.rmSync(path.join(extDir, name), { recursive: true, force: true });
       removed++;
     }
@@ -149,7 +153,7 @@ function updateRegistry(file, extDir, version, { add }) {
     return;
   }
   if (!Array.isArray(list)) return;
-  const ours = (e) => e && e.identifier && String(e.identifier.id).toLowerCase() === EXTENSION_ID;
+  const ours = (e) => e && e.identifier && isOurId(e.identifier.id);
   const had = list.some(ours);
   if (!had && !add) return;
   list = list.filter((e) => !ours(e));
@@ -168,6 +172,31 @@ function updateRegistry(file, extDir, version, { add }) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(list));
   fs.renameSync(tmp, file);
+}
+
+/** Removes registry entries left by builds before 0.4.0, in the default registry and every profile. */
+function dropLegacyEntries(app, extDir) {
+  const files = [path.join(extDir, 'extensions.json')];
+  const root = path.join(appDataDir(app), 'User', 'profiles');
+  try {
+    for (const profile of fs.readdirSync(root)) files.push(path.join(root, profile, 'extensions.json'));
+  } catch {
+    /* no profiles */
+  }
+  for (const file of files) {
+    let list;
+    try {
+      list = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(list)) continue;
+    const kept = list.filter((e) => !(e && e.identifier && LEGACY_IDS.includes(String(e.identifier.id).toLowerCase())));
+    if (kept.length === list.length) continue;
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(kept));
+    fs.renameSync(tmp, file);
+  }
 }
 
 /**
@@ -200,7 +229,7 @@ function copyExtension(extDir, version) {
   const src = path.dirname(findUnpacked());
   const dest = path.join(extDir, `${EXTENSION_ID}-${version}`);
   fs.mkdirSync(dest, { recursive: true });
-  for (const item of ['package.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'src', 'hook']) {
+  for (const item of ['package.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'src', 'hook', 'media']) {
     const from = path.join(src, item);
     if (fs.existsSync(from)) fs.cpSync(from, path.join(dest, item), { recursive: true });
   }
@@ -219,14 +248,18 @@ function installExtension() {
     if (!cli && !fs.existsSync(extDir)) continue;
     // An editor that is really in use has extensions installed; a leftover
     // config folder with an empty registry is not worth installing into.
-    const hasDir = fs.existsSync(extDir) && fs.readdirSync(extDir).some((n) => n !== 'extensions.json' && !n.startsWith('.') && !n.startsWith(EXTENSION_ID));
+    const hasDir = fs.existsSync(extDir) && fs.readdirSync(extDir).some((n) => n !== 'extensions.json' && !n.startsWith('.') && ![EXTENSION_ID, ...LEGACY_IDS].some((id) => n.toLowerCase().startsWith(id)));
     if (!cli && !hasDir) continue;
     if (cli && vsix) {
       // Let the editor replace its own registered copy; only then clear out
       // older folders (removing a registered one first makes the CLI fail).
       const r = spawnSync(cli, ['--install-extension', vsix, '--force'], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
       if (r.status === 0) {
-        if (fs.existsSync(extDir)) removeOldCopies(extDir, version);
+        if (fs.existsSync(extDir)) {
+          removeOldCopies(extDir, version);
+          dropLegacyEntries(ed.app, extDir);
+          dropScanCache(ed.app);
+        }
         done.push(`${ed.label} (via ${ed.cli})`);
         continue;
       }
@@ -253,7 +286,9 @@ const restartNeeded = [];
 function uninstallExtension() {
   for (const ed of EDITORS) {
     const found = onPath(ed.cli);
-    if (found && isCliLauncher(found)) spawnSync(found, ['--uninstall-extension', EXTENSION_ID], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
+    if (found && isCliLauncher(found)) {
+      for (const id of [EXTENSION_ID, ...LEGACY_IDS]) spawnSync(found, ['--uninstall-extension', id], { encoding: 'utf8', env: cleanEnv(), timeout: 120_000 });
+    }
     const extDir = path.join(os.homedir(), ed.dir, 'extensions');
     if (fs.existsSync(extDir) && removeOldCopies(extDir, null)) {
       register(extDir, null);

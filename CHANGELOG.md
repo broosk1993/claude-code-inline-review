@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+First public release, as **Inline Review for Claude Code**
+(`broosk1993.claude-code-inline-review`) on the VS Code Marketplace and Open VSX.
+
+- New extension ID. If you installed an earlier build by hand
+  (`local.claude-inline-review`), the extension warns that both are running;
+  uninstall the old one. The installer removes it for you.
+- The hook command uses an absolute path on Windows, where `$HOME` is not expanded.
+- The installer keeps the editor's extension registries (including per-profile
+  ones) and its cached scan in step with what it installs.
+
 ## 0.3.0
 
 New:

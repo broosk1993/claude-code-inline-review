@@ -256,7 +256,7 @@ async function restoreAfterSkip(name) {
 }
 
 async function run() {
-  const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'claude-inline-review');
+  const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'claude-code-inline-review');
   assert.ok(ext, 'extension is loaded');
   api = await ext.activate();
   // A freshly started editor takes a moment before its file watcher reports

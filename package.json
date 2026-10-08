@@ -1,28 +1,51 @@
 {
-  "name": "claude-inline-review",
-  "displayName": "Claude Inline Review",
-  "description": "Cursor-style inline review of Claude Code edits in Cursor and VS Code: green added code, red removed code, word-level highlights, Accept / Reject per change, per file or everything, with undo.",
-  "version": "0.3.0",
-  "publisher": "local",
+  "name": "claude-code-inline-review",
+  "displayName": "Inline Review for Claude Code",
+  "description": "Cursor-style inline review of Claude Code's edits in VS Code and Cursor: added code in green, removed code in red where it was, word-level highlights, and Accept / Reject per change, per file or everything, with undo.",
+  "version": "0.4.0",
+  "publisher": "broosk1993",
+  "author": {
+    "name": "Brusk Awat"
+  },
   "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
-    "url": "https://example.com/local/claude-inline-review"
+    "url": "https://github.com/broosk1993/claude-code-inline-review.git"
   },
+  "bugs": {
+    "url": "https://github.com/broosk1993/claude-code-inline-review/issues"
+  },
+  "homepage": "https://github.com/broosk1993/claude-code-inline-review#readme",
+  "qna": false,
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other",
-    "SCM Providers"
+    "SCM Providers",
+    "AI"
   ],
   "keywords": [
     "claude",
     "claude code",
-    "review",
+    "ai",
+    "agent",
     "inline diff",
-    "ai"
+    "code review",
+    "accept reject",
+    "cursor"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -424,7 +447,7 @@
       }
     ],
     "configuration": {
-      "title": "Claude Inline Review",
+      "title": "Inline Review for Claude Code",
       "properties": {
         "claudeReview.showCodeLens": {
           "type": "boolean",
@@ -485,6 +508,7 @@
     "@types/vscode": "1.85.0",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.2.1",
+    "ovsx": "^0.10.12",
     "typescript": "^5.6.3"
   }
 }

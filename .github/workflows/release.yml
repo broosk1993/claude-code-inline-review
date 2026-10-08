@@ -1,0 +1,62 @@
+name: Release
+
+# Push a v<version> tag to release. Re-run by hand (with the tag) after adding
+# a registry secret, to publish a release that skipped that registry.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release or publish again
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: Check the tag matches package.json
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          [ "$version" = "$TAG" ] || { echo "::error::tag $TAG does not match package.json $version"; exit 1; }
+
+      - run: npm run package
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.js > notes.md
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          gh release upload "$TAG" dist/*.vsix dist/*.zip --clobber
+
+      - name: Publish to the VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx vsce publish --packagePath dist/*.vsix --skip-duplicate
+
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx ovsx publish dist/*.vsix --skip-duplicate
+
+      - name: Registries skipped
+        if: env.VSCE_PAT == '' || env.OVSX_PAT == ''
+        run: |
+          [ -n "$VSCE_PAT" ] || echo "::warning::VSCE_PAT is not set: not published to the VS Code Marketplace"
+          [ -n "$OVSX_PAT" ] || echo "::warning::OVSX_PAT is not set: not published to Open VSX"

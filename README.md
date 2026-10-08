@@ -1,12 +1,17 @@
-# Claude Inline Review
+# Inline Review for Claude Code
 
-Cursor-style review of Claude Code's edits, inside the file, in Cursor or VS Code.
+Cursor-style review of [Claude Code](https://www.anthropic.com/claude-code)'s
+edits, inside the file, in **VS Code** and **Cursor** (and other VS Code-based
+editors).
 
 When Claude Code changes a file, the change shows up where it happened: added
 lines in green with the changed words highlighted, removed code in a red block
 where it used to be, and **Accept** / **Reject** on every change. Review one
 change, one file, or everything at once. Your own typing is never mistaken for
 Claude's, and every decision can be undone.
+
+> A community extension. It is not made by, endorsed by, or affiliated with
+> Anthropic or Cursor.
 
 ## What you get
 
@@ -39,27 +44,42 @@ Claude's, and every decision can be undone.
 
 ## Install
 
-From the release folder:
+**Requirements:** [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+and [Node.js](https://nodejs.org) on your `PATH` (Claude Code runs the review
+hook with `node`).
+
+1. Install the extension:
+   - **VS Code**: search for *Inline Review for Claude Code* in the Extensions
+     view, or `code --install-extension broosk1993.claude-code-inline-review`.
+   - **Cursor, VSCodium, Windsurf** (Open VSX): search for it in the
+     Extensions view.
+   - **Any editor, offline**: download the `.vsix` from the
+     [latest release](https://github.com/broosk1993/claude-code-inline-review/releases/latest)
+     and run *Extensions: Install from VSIX…*.
+2. Connect Claude Code: on first start the extension offers **Set up**, or run
+   **Claude Review: Set up Claude Code hook** from the command palette. It copies
+   a small hook script to `~/.claude/hooks/` and adds it to
+   `~/.claude/settings.json` (after a backup; a settings file it cannot read is
+   never touched).
+3. Start a new Claude Code session. Its edits now show up for review.
+
+Setup asks whether Claude Code may apply edits without asking
+(`permissions.defaultMode: acceptEdits`). That is the recommended mode: Claude
+writes, and you accept or reject here instead of in a prompt for every edit.
+Bash commands still ask. Say no and nothing about your permissions changes.
+
+The extension keeps the installed hook up to date on every start.
+
+### Without the marketplace
+
+The release zip contains an installer that does both steps for every editor it
+finds:
 
 ```bash
-node install.js                # asks whether Claude may edit without asking
+node install.js                # asks about acceptEdits
 node install.js --accept-edits # or decide up front (--keep-mode to leave it)
+node install.js --uninstall    # remove hook, settings entry and extension (--purge drops pending reviews)
 ```
-
-It copies the hook to `~/.claude/hooks/`, adds it to `~/.claude/settings.json`
-(after a backup; an unreadable settings file is never touched, a symlinked one
-is written through, its permissions kept) and installs the
-extension into every Cursor / VS Code / VSCodium / Windsurf it finds. Reload the
-editor window and restart Claude Code.
-
-Or install the `.vsix` from the editor ("Extensions: Install from VSIX…") and
-run **Claude Review: Set up Claude Code hook**; the extension also offers this
-on first start. It keeps the installed hook in step with itself on every start.
-
-`acceptEdits` is recommended: Claude applies its edits and you review them
-here, instead of approving each one in a prompt. Bash commands still ask.
-
-Uninstall: `node install.js --uninstall` (add `--purge` to drop pending reviews).
 
 ## Settings
 
@@ -100,6 +120,12 @@ to your theme's diff colors).
   "Undo last review action".
 - Text files only; binary files and files over 8 MB are skipped.
 
+## Privacy
+
+Everything stays on your machine. Baselines (copies of files as they were
+before Claude changed them) are kept in `~/.claude/review/baselines` until you
+accept or reject the change; nothing is sent anywhere.
+
 ## Development
 
 ```bash
@@ -108,3 +134,15 @@ npm test            # unit tests + type-check against the VS Code 1.85 API
 npm run test:e2e    # runs the suite inside a real VS Code (temp profile)
 npm run package     # dist/: .vsix, release folder, zip
 ```
+
+`CIR_EDITOR=/path/to/editor-binary npm run test:e2e` runs the end-to-end suite
+in another editor, Cursor for example.
+
+Releases: bump `version` in `package.json` and the hook's header, add a
+CHANGELOG entry, then push a `v<version>` tag. CI tests, builds, attaches the
+`.vsix` and zip to a GitHub release, and publishes to the VS Code Marketplace
+and Open VSX when the `VSCE_PAT` and `OVSX_PAT` secrets are set.
+
+## License
+
+[MIT](LICENSE)

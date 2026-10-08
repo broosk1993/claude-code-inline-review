@@ -11,6 +11,9 @@ const HOOK = path.join(__dirname, '../../hook/review-snapshot.js');
 const store = require('../../src/store');
 const setup = require('../../src/setup');
 
+// Symlinks need extra privileges on Windows, and POSIX file modes do not exist there.
+const posixOnly = { skip: process.platform === 'win32' && 'needs POSIX symlinks and file modes' };
+
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'cir-test-'));
 }
@@ -72,7 +75,7 @@ test('hook strips a UTF-8 BOM so the first line does not diff', () => {
   assert.equal([...store.loadEntries(dir).values()][0].content, 'hello\n');
 });
 
-test('a symlinked path and its target are one review', () => {
+test('a symlinked path and its target are one review', posixOnly, () => {
   const root = tmpdir();
   const dir = path.join(root, 'b');
   const real = path.join(root, 'real');
@@ -86,7 +89,7 @@ test('a symlinked path and its target are one review', () => {
   assert.equal(entry.key, store.keyOf(path.join(root, 'link', 'f.txt')));
 });
 
-test('a v0.2 baseline under a symlinked path still blocks a second snapshot', () => {
+test('a v0.2 baseline under a symlinked path still blocks a second snapshot', posixOnly, () => {
   const root = tmpdir();
   const dir = path.join(root, 'b');
   fs.mkdirSync(dir);
@@ -101,7 +104,7 @@ test('a v0.2 baseline under a symlinked path still blocks a second snapshot', ()
   assert.equal([...store.loadEntries(dir).values()][0].content, 'v02 baseline\n');
 });
 
-test('very long paths get a hashed baseline name', () => {
+test('very long paths get a hashed baseline name', posixOnly, () => {
   const root = tmpdir();
   const dir = path.join(root, 'b');
   let deep = root;
@@ -190,7 +193,12 @@ test('setup: repairs an old matcher, refuses invalid JSON, uninstalls cleanly', 
 });
 
 test('setup: recognises the v0.2 hook as ours and out of date', () => {
-  const legacy = fs.readFileSync(path.join(os.homedir(), 'Downloads/claude-inline-review-0.2.0/claude-inline-review/review-snapshot.js'), 'utf8');
+  // The header of the v0.2 hook, which carried no version marker.
+  const legacy = `// Claude Code PreToolUse hook.
+// Before Claude edits a file, save the file's current content as the "review baseline".
+// Only the FIRST edit since your last review creates a baseline, so later edits pile up
+// into the same pending review (like Cursor). The VS Code extension "Claude Inline Review"
+// reads these baselines and shows the differences inline with Accept / Reject.`;
   assert.equal(setup.hookVersion(legacy), 'legacy');
   assert.equal(setup.hookVersion(fs.readFileSync(HOOK, 'utf8')), require('../../package.json').version);
   assert.equal(setup.hookVersion('console.log(1)'), null);
@@ -215,7 +223,7 @@ test('hook PostToolUse marks a pending baseline as landed, and nothing else', ()
   assert.deepEqual(fs.readdirSync(dir), [], 'removing a review removes its marker');
 });
 
-test('setup writes through a symlinked settings.json and keeps its permissions', () => {
+test('setup writes through a symlinked settings.json and keeps its permissions', posixOnly, () => {
   const dir = tmpdir();
   const dotfiles = tmpdir();
   const real = path.join(dotfiles, 'claude-settings.json');
@@ -239,4 +247,11 @@ test('setup only ever upgrades the hook', () => {
   fs.writeFileSync(path.join(dir, 'hooks', 'review-snapshot.js'), '// claude-inline-review hook v9.0.0\n');
   const st = setup.status(HOOK, dir);
   assert.equal(st.outdated, false, 'a newer hook from another editor is left alone');
+});
+
+test('the hook command is portable on POSIX and absolute on Windows', () => {
+  const home = path.join(os.homedir(), '.claude');
+  assert.equal(setup.hookCommand(home, 'linux'), setup.DEFAULT_COMMAND);
+  assert.equal(setup.hookCommand(home, 'win32'), `node "${path.join(home, 'hooks', 'review-snapshot.js')}"`);
+  assert.equal(setup.hookCommand('/elsewhere', 'linux'), `node "${path.join('/elsewhere', 'hooks', 'review-snapshot.js')}"`);
 });

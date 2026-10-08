@@ -24,9 +24,13 @@ function settingsPath(dir = claudeDir()) {
   return path.join(dir, 'settings.json');
 }
 
-/** The settings command; the portable $HOME form unless Claude's config lives elsewhere. */
-function hookCommand(dir = claudeDir()) {
-  return path.resolve(dir) === path.join(os.homedir(), '.claude') ? DEFAULT_COMMAND : `node "${hookPath(dir)}"`;
+/**
+ * The settings command: the portable $HOME form, unless Claude's config lives
+ * elsewhere or the hook runs on Windows, where $HOME is not expanded.
+ */
+function hookCommand(dir = claudeDir(), platform = process.platform) {
+  const portable = platform !== 'win32' && path.resolve(dir) === path.join(os.homedir(), '.claude');
+  return portable ? DEFAULT_COMMAND : `node "${hookPath(dir)}"`;
 }
 
 const isOurCommand = (cmd) => typeof cmd === 'string' && cmd.includes(HOOK_FILE);
@@ -35,6 +39,7 @@ const isOurCommand = (cmd) => typeof cmd === 'string' && cmd.includes(HOOK_FILE)
 function hookVersion(text) {
   const m = /claude-inline-review hook v(\d+\.\d+\.\d+)/.exec(text);
   if (m) return m[1];
+  // v0.2 had no version marker; it named the extension in its header.
   return /Claude Inline Review/.test(text) && /baseline/.test(text) ? 'legacy' : null;
 }
 

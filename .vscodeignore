@@ -1,9 +1,11 @@
+.github/**
 .gitignore
 .vscode-test/**
 dist/**
 node_modules/**
 scripts/**
 test/**
+media/icon.svg
 jsconfig.json
 **/*.vsix
 **/*.tmp
