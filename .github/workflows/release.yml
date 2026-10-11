@@ -53,7 +53,13 @@ jobs:
 
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
-        run: npx ovsx publish dist/*.vsix --skip-duplicate
+        run: |
+          # The publisher's namespace must exist before the first publish.
+          publisher="$(node -p "require('./package.json').publisher")"
+          if ! curl -sf "https://open-vsx.org/api/$publisher" > /dev/null; then
+            npx ovsx create-namespace "$publisher"
+          fi
+          npx ovsx publish dist/*.vsix --skip-duplicate
 
       - name: Registries skipped
         if: env.VSCE_PAT == '' || env.OVSX_PAT == ''
