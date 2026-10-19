@@ -166,7 +166,8 @@ function updateRegistry(file, extDir, version, { add }) {
       version,
       location: { $mid: 1, fsPath: location, external: url.href, path: url.pathname, scheme: 'file' },
       relativeLocation: folder,
-      metadata: { installedTimestamp: Date.now(), pinned: true, source: 'vsix' },
+      // Not pinned: the marketplace may update it from here on.
+      metadata: { installedTimestamp: Date.now(), pinned: false, source: 'vsix' },
     });
   }
   const tmp = `${file}.${process.pid}.tmp`;
