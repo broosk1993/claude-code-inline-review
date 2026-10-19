@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+- Clears the badge an earlier version left on the Source Control icon. The
+  window keeps a view's badge across an extension-host restart, so updating
+  from 0.4.0 without reloading the window kept showing the old count.
+
 ## 0.4.1
 
 - The Claude Changes view no longer puts a badge on the Source Control icon,

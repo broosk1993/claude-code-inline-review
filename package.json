@@ -2,7 +2,7 @@
   "name": "claude-code-inline-review",
   "displayName": "Inline Review for Claude Code",
   "description": "Cursor-style inline review of Claude Code's edits in VS Code and Cursor: added code in green, removed code in red where it was, word-level highlights, and Accept / Reject per change, per file or everything, with undo.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "broosk1993",
   "author": {
     "name": "Brusk Awat"

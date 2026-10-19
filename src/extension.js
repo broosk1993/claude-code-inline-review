@@ -1320,6 +1320,10 @@ function activate(context) {
   ui.baseChanged = new vscode.EventEmitter();
   ui.tree = tree;
   ui.treeView = vscode.window.createTreeView('claudeReview.changes', { treeDataProvider: tree, showCollapseAll: true });
+  // 0.4.0 badged this view, and the window keeps a view's badge across an
+  // extension-host restart: after an update without a window reload, the old
+  // count stayed on the Source Control icon. Clear it explicitly.
+  ui.treeView.badge = undefined;
 
   ui.summary = statusItem('summary', 100, '', 'listFiles', '');
   ui.prev = statusItem('prev', 99, '$(chevron-up)', 'prevHunk', 'Previous change');
