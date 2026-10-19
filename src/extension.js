@@ -616,13 +616,16 @@ function updateStatus() {
   const total = keys.reduce((s, k) => s + pending.get(k).hunks.length, 0);
   if (!total) {
     for (const item of ui.status) item.hide();
-    ui.treeView.badge = undefined;
+    ui.treeView.description = undefined;
     return;
   }
   ui.summary.text = `$(sparkle) ${plural(total, 'change')}` + (keys.length > 1 ? ` · ${keys.length} files` : '');
   ui.summary.tooltip = `Claude changes waiting for review in ${plural(keys.length, 'file')}. Click to list them.`;
   ui.summary.show();
-  ui.treeView.badge = { value: total, tooltip: `${plural(total, 'Claude change')} to review` };
+  // A view badge is added onto its container's icon, and this view lives in
+  // Source Control: there it reads as a count of git changes. The count goes
+  // next to the view's title instead.
+  ui.treeView.description = `${plural(total, 'change')} · ${plural(keys.length, 'file')}`;
 
   const ed = activeFileEditor();
   const key = ed && store.keyOf(ed.document.uri.fsPath);
@@ -1464,6 +1467,7 @@ function activate(context) {
     historyLength: () => history.length,
     context: (name) => contextCache.get(name),
     tree,
+    treeView: () => ({ badge: ui.treeView.badge, description: ui.treeView.description }),
     baselineDir: dir,
   };
 }

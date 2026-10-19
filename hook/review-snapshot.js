@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// claude-inline-review hook v0.4.0
+// claude-inline-review hook v0.4.1
 //
 // Claude Code hook for Edit, MultiEdit and Write.
 //

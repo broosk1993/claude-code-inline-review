@@ -176,6 +176,9 @@ it('the Claude Changes view lists files and their changes', async () => {
   assert.ok(fileNode, 'b.txt is listed');
   const item = api.tree.getTreeItem(fileNode);
   assert.match(String(item.description), /−2 \+2/);
+  // No badge: in the Source Control container it would read as a git count.
+  assert.equal(api.treeView().badge, undefined);
+  assert.match(String(api.treeView().description), /changes? · \d+ files?/);
   const hunks = await api.tree.getChildren(fileNode);
   assert.equal(hunks.length, 2);
   assert.match(String(api.tree.getTreeItem(hunks[0]).label), /Line 1/);

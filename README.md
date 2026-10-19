@@ -22,7 +22,7 @@ Claude's, and every decision can be undone.
 | **Cursor's keys** | With the cursor inside a change: `Ctrl+Y` / `⌘Y` accepts, `Ctrl+N` / `⌘N` rejects. Outside a change those keys do what they always did. `Ctrl+Alt+Enter` / `Ctrl+Alt+Backspace` always work. |
 | **Flow** | After a decision the cursor moves to the next change. `Ctrl+Alt+↓` / `↑` walks every change across every file. |
 | **Review bar** | Status bar: `✦ 7 changes · 3 files`, and for the open file `▲ 2 of 5 ▼  Accept file  Reject file`. Same buttons in the editor title bar. |
-| **Claude Changes view** | In the Source Control sidebar: every file with `−removed +added`, each change underneath with a preview, accept/reject buttons inline, a badge with the count. |
+| **Claude Changes view** | In the Source Control sidebar: every file with `−removed +added`, each change underneath with a preview, accept/reject buttons inline, the count beside the view's title. |
 | **Full diffs** | "Show before/after diff" for one file, or "Open all changes in one diff" (multi-file diff editor). The native diff editor's revert arrows work too. |
 | **Undo** | `Ctrl+Z` right after a reject brings the change back *for review*. "Claude Review: Undo last review action" undoes accept/reject of a change, a file, or everything; accept all / reject all also offer Undo in their notification. |
 | **Your edits stay yours** | Typing, pasting, formatting outside Claude's changes goes into the baseline; editing inside a change makes it part of that change. |

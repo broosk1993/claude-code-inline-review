@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- The Claude Changes view no longer puts a badge on the Source Control icon,
+  where its count of pending Claude changes read as a number of git changes.
+  The count now sits beside the view's title (and stays in the status bar).
+
 ## 0.4.0
 
 First public release, as **Inline Review for Claude Code**
